@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journey · Next Best Email</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link href="css/app.css" rel="stylesheet">
+  <style>
+    .lane-cell.sel { background: #e7f1fd; }
+    .axis.sel { color: #188aec; font-weight: 700; }
+    .ladder { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+    .ladder .step { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; background: #fff; }
+    .ladder .step.done { border-color: #9dc9f7; background: #f1f7fe; }
+    .ladder .step.now { border-color: #188aec; box-shadow: 0 0 0 1px #188aec; }
+    .ladder .when { font-variant-numeric: tabular-nums; color: var(--muted); }
+    .filter-chips .btn { --bs-btn-padding-y: .15rem; --bs-btn-font-size: .8rem; }
+  </style>
+</head>
+<body data-page="journeys" data-title="Journey" data-crumbs="Admin / Next Best Email / Journeys / Person">
+  <template id="page-actions">
+    <a class="btn btn-outline-secondary btn-sm" id="prev-person"><i class="fa-solid fa-chevron-left"></i></a>
+    <a class="btn btn-outline-secondary btn-sm" id="next-person"><i class="fa-solid fa-chevron-right"></i></a>
+    <a href="journeys.html" class="btn btn-outline-secondary btn-sm">All journeys</a>
+  </template>
+
+  <div id="app">
+    <nav id="sidebar" aria-label="Admin"></nav>
+    <div id="main">
+      <header id="page-header"></header>
+      <div class="container-fluid pb-5">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="who"></div>
+        <div class="ladder mb-4" id="ladder"></div>
+
+        <div class="panel mb-4">
+          <div class="panel-h">
+            <h2>Everything that happened, by day</h2>
+            <div class="legend">
+              <span><i class="sw" style="background:var(--t3)"></i>T3 nudge</span>
+              <span><i class="sw" style="background:var(--t4)"></i>T4 app</span>
+              <span><i class="sw" style="background:var(--t5)"></i>T5 upsell</span>
+              <span><i class="sw" style="background:var(--t6)"></i>T6 broadcast</span>
+              <span><i class="sw" style="border:1.5px dashed #8d959d"></i>Holdout drip</span>
+              <span><i class="sw" style="background:var(--t3);opacity:.35"></i>Not opened</span>
+              <span><i class="sw" style="background:#212529;border-radius:50%;width:7px;height:7px"></i>Clicked</span>
+              <span><i class="sw" style="background:#ced4da;border-radius:50%;width:6px;height:6px"></i>Held</span>
+            </div>
+          </div>
+          <div class="panel-b">
+            <div class="dayscroll"><div class="daygrid" id="lanes"></div></div>
+            <div class="small muted mt-2">Shaded: week one. Click any mark to open that day's decision.</div>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-lg-6">
+            <div class="panel">
+              <div class="panel-h">
+                <h2>Activity log</h2>
+                <div class="btn-group filter-chips" role="group" id="log-filter">
+                  <button class="btn btn-outline-secondary active" data-f="all">All</button>
+                  <button class="btn btn-outline-secondary" data-f="email">Emails</button>
+                  <button class="btn btn-outline-secondary" data-f="click">Clicks</button>
+                  <button class="btn btn-outline-secondary" data-f="move">Rung moves</button>
+                  <button class="btn btn-outline-secondary" data-f="signal">App activity</button>
+                </div>
+              </div>
+              <div class="panel-b pt-1 event-log" id="log"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="panel">
+              <div class="panel-h"><h2 id="dec-title">Decision</h2><span class="small muted" id="dec-sub"></span></div>
+              <div class="panel-b" id="decision"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/library.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/shell.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    NBE.mount();
+    const $ = (id) => document.getElementById(id);
+    const people = NBE.people();
+    const p = people.find((x) => x.id === params.get('u')) || people[0];
+    const idx = people.indexOf(p);
+    document.querySelector('#page-header h1').textContent = p.name;
+    document.title = `${p.name} · Journey`;
+    $('prev-person').href = `journey.html?u=${people[(idx - 1 + people.length) % people.length].id}`;
+    $('next-person').href = `journey.html?u=${people[(idx + 1) % people.length].id}`;
+    const RUNG_COLOR = { S0: '#e3e6e9', S1: '#cfe2fb', S2: '#9dc9f7', S3: '#5fa9f0', S4: '#188aec', S5: '#0b5ea8' };
+
+    const opened = p.emails.filter((e) => e.opened).length, clicked = p.emails.filter((e) => e.clicked).length;
+    $('who').innerHTML = `
+      ${p.holdout ? '<span class="badge text-bg-light border">Holdout: per-app drips, no orchestrator</span>' : '<span class="badge text-bg-primary">Orchestrated</span>'}
+      <span class="small muted">${NBE.esc(p.email)}</span>
+      <span class="small">Came in through ${NBE.appChip(p.entry)}</span>
+      <span class="small">Situation: <b>${p.diagnosis}</b></span>
+      <span class="small ms-lg-auto num"><b>${p.emails.length}</b> emails · <b>${NBE.pct(opened, p.emails.length)}</b> opened · <b>${clicked}</b> clicked · <b>${p.state.followers}</b> ${p.state.followers === 1 ? 'person' : 'people'} on registry · <b>$${p.state.raised}</b> raised</span>`;
+
+    const nowIdx = NBE.rungIndex(p.rung);
+    $('ladder').innerHTML = NBE.RUNGS.map((r, i) => {
+      const done = i <= nowIdx;
+      const conv = p.conversions.find((c) => c.to === r.key) ||
+        p.conversions.find((c) => NBE.rungIndex(c.from) < i && NBE.rungIndex(c.to) > i);
+      // Only S3 is truly skippable: a first gift can land before 5+ people join.
+      const skipped = done && r.key === 'S3' && !p.conversions.some((c) => c.to === 'S3');
+      return `<div class="step ${done && !skipped ? 'done' : ''} ${i === nowIdx ? 'now' : ''}" ${skipped ? 'style="opacity:.55;border-style:dashed"' : ''}>
+        <div>${NBE.rungPill(r.key)}</div>
+        <div class="mt-1">${r.name}</div>
+        <div class="when">${!done ? 'Not yet' : skipped ? 'Skipped' : i === 0 ? 'Day 1' : conv ? `Day ${conv.day}` : 'Day 1'}
+        ${!skipped && conv && conv.cause ? `<i class="fa-solid fa-envelope-circle-check text-primary ms-1" title="After clicking: ${NBE.esc(NBE.cand(conv.cause).subject)}"></i>` : ''}</div>
+      </div>`;
+    }).join('');
+
+    // ---- swimlanes ----
+    const apps = NBE.APPS.filter((a) => p.state.apps.has(a.key));
+    function lane(label, cellFn) {
+      let html = `<div class="lbl lane">${label}</div>`;
+      for (let d = 1; d <= NBE.DAYS; d++) html += `<div class="lane-cell lane ${d <= 7 ? 'wkband' : ''}" data-day="${d}">${cellFn(d)}</div>`;
+      return html;
+    }
+    function renderLanes() {
+      let html = '<div></div>';
+      for (let d = 1; d <= NBE.DAYS; d++) html += `<div class="axis" data-day="${d}">${d === 1 || d % 10 === 0 ? d : ''}</div>`;
+      html += lane('<b>Rung</b>', (d) => {
+        const day = p.days[d - 1], conv = p.conversions.find((c) => c.day === d);
+        return `<div class="rungcell" style="background:${RUNG_COLOR[day.rung]}" title="Day ${d}: ${day.rung}, ${day.followers} people"></div>${conv ? `<span class="convflag">${conv.to}</span>` : ''}`;
+      });
+      html += lane(`<b>Emails</b>`, (d) => {
+        const today = p.emails.filter((x) => x.day === d);
+        if (!today.length) return '';
+        const h = today.length > 1 ? Math.floor(26 / today.length) - 1 : 20;
+        return `<span class="d-flex flex-column gap-px w-100 align-items-center" style="gap:1px">${today.map((e) =>
+          `<button class="mail ${NBE.TIERS[e.tier].cls} ${e.opened ? '' : 'unopened'} ${e.clicked ? 'clicked' : ''}" style="height:${h}px" data-day="${d}" title="${NBE.esc(NBE.cand(e.cand).subject)}"></button>`).join('')}</span>`;
+      });
+      if (!p.holdout) html += lane('<span class="muted">Held</span>', (d) => {
+        const dec = p.decisions.find((x) => x.day === d);
+        return dec && dec.held ? `<span class="held" data-day="${d}" title="${NBE.esc(dec.held)}"></span>` : '';
+      });
+      apps.forEach((a) => {
+        html += lane(`${NBE.appDot(a.key)} ${a.name}`, (d) => {
+          const sigs = p.signals.filter((s) => s.day === d && s.app === a.key && s.name !== 'email_click');
+          if (!sigs.length) return '';
+          const money = sigs.some((s) => s.name === 'donation');
+          return `<span class="sig ${sigs.length > 1 ? 'big' : ''} ${money ? 'money' : ''}" style="--app:${a.color}" data-day="${d}" tabindex="0" title="${NBE.esc(sigs.map((s) => s.detail).join(' · '))}"></span>`;
+        });
+      });
+      $('lanes').innerHTML = html;
+    }
+
+    // ---- activity log ----
+    const events = [
+      ...p.signals.filter((s) => s.name !== 'email_click').map((s) => ({ day: s.day, kind: s.name === 'signed_up' || s.name === 'active' ? 'signal' : 'signal', icon: `<span class="app-dot" style="--app:${NBE.app(s.app).color}"></span>`, text: NBE.esc(s.detail), side: `<span class="small muted">${NBE.app(s.app).name}</span>` })),
+      ...p.emails.map((e) => ({ day: e.day, kind: e.clicked ? 'email click' : 'email', icon: `<i class="fa-solid fa-envelope ${e.opened ? 'text-primary' : 'muted'}"></i>`, text: `${NBE.esc(NBE.cand(e.cand).subject)} <span class="small muted">${e.clicked ? 'opened, clicked' : e.opened ? 'opened' : 'not opened'}</span>`, side: NBE.tierBadge(e.tier) })),
+      ...p.conversions.map((c) => ({ day: c.day, kind: 'move', icon: '<i class="fa-solid fa-arrow-trend-up text-primary"></i>', text: `<b>Moved ${c.from} to ${c.to}</b>${c.cause ? ` <span class="small muted">after clicking "${NBE.esc(NBE.cand(c.cause).subject)}"</span>` : ' <span class="small muted">on their own</span>'}`, side: NBE.rungPill(c.to) })),
+    ].sort((a, b) => a.day - b.day || (a.kind === 'move') - (b.kind === 'move'));
+    let logFilter = 'all';
+    function renderLog() {
+      $('log').innerHTML = events.filter((e) => logFilter === 'all' || e.kind.includes(logFilter)).map((e) => `
+        <div class="ev clickable ${e.day === selected ? 'is-selected' : ''}" data-day="${e.day}">
+          <span class="small muted num">Day ${e.day}</span><span class="text-center">${e.icon}</span><span>${e.text}</span><span>${e.side}</span>
+        </div>`).join('') || '<div class="small muted py-3">Nothing of that kind happened.</div>';
+    }
+    $('log-filter').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-f]'); if (!b) return;
+      logFilter = b.dataset.f;
+      $('log-filter').querySelectorAll('.btn').forEach((x) => x.classList.toggle('active', x === b));
+      renderLog();
+    });
+
+    // ---- decision panel ----
+    function renderDecision() {
+      const d = selected;
+      $('dec-title').textContent = `Day ${d}`;
+      const day = p.days[d - 1];
+      $('dec-sub').innerHTML = `${NBE.rungPill(day.rung)} <span class="ms-1">${day.followers} people, $${day.raised} raised</span>`;
+      const sent = p.emails.filter((e) => e.day === d);
+      const dec = p.decisions.find((x) => x.day === d);
+      const moves = p.conversions.filter((c) => c.day === d);
+      let html = moves.map((c) => `<div class="alert alert-primary py-2 small mb-3"><b>Moved ${c.from} to ${c.to}.</b> ${c.cause ? `Credited to "${NBE.esc(NBE.cand(c.cause).subject)}", clicked within the last 2 days.` : 'No recent email click, so nothing is credited.'}</div>`).join('');
+
+      if (p.holdout) {
+        html += sent.length
+          ? `<p class="small">This person is in the holdout, so nothing was ranked. Their apps' own sequences fired ${sent.length} email${sent.length === 1 ? '' : 's'} today:</p>` + sent.map((e) => `<div class="d-flex justify-content-between border rounded px-2 py-2 mb-2 small"><span>${NBE.esc(NBE.cand(e.cand).subject)}</span>${NBE.tierBadge('DRIP')}</div>`).join('')
+          : '<p class="small muted mb-0">Holdout: no orchestrator decision, and no drip fired today.</p>';
+        $('decision').innerHTML = html; return;
+      }
+      if (!dec) { $('decision').innerHTML = html + '<p class="small muted mb-0">No candidate matched this person today, so the orchestrator had nothing to consider.</p>'; return; }
+
+      const winner = dec.winner && NBE.cand(dec.winner);
+      const email = sent.find((e) => e.cand === dec.winner);
+      if (winner) {
+        const top = dec.candidates[0];
+        html += `<div class="border rounded p-3 mb-3">
+          <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+            <div><div class="small muted">Sent</div><div class="fw-semibold">${NBE.esc(winner.subject)}</div><div class="small muted">${NBE.esc(winner.name)} · ${NBE.app(winner.app).name}</div><a class="small" href="editor.html?c=${winner.id}&u=${p.id}"><i class="fa-solid fa-envelope-open-text me-1"></i>Open this email as ${NBE.esc(p.name.split(' ')[0])}</a></div>
+            ${NBE.tierBadge(winner.tier)}
+          </div>
+          <div class="small mb-2">${email.clicked ? '<i class="fa-solid fa-computer-mouse text-primary"></i> Opened and clicked' : email.opened ? '<i class="fa-solid fa-envelope-open text-primary"></i> Opened, no click' : '<i class="fa-solid fa-envelope muted"></i> Not opened'}</div>
+          <div class="small muted mb-1">Why it scored <b class="text-body num">${top.score.toFixed(2)}</b></div>
+          <div class="small num">tier ${top.parts.tier} × rung ${top.parts.rung} × freshness (0.45 + 0.55 × ${top.parts.freshness}) − fatigue ${top.parts.fatigue}</div>
+        </div>`;
+      } else {
+        html += `<div class="border rounded p-3 mb-3 bg-light"><div class="small muted">Held, nothing sent</div><div class="fw-semibold">${NBE.esc(dec.held)}</div></div>`;
+      }
+      const max = Math.max(...dec.candidates.map((c) => c.score), 0.01);
+      html += `<div class="small fw-semibold mb-2">Considered (${dec.candidates.length}), ranked by tier then score</div>` +
+        dec.candidates.map((c, i) => `
+          <div class="d-grid align-items-center gap-2 mb-2 small" style="grid-template-columns:38px 1fr 90px 44px">
+            ${NBE.tierBadge(c.tier)}
+            <span class="${c.cand === dec.winner ? 'fw-semibold' : ''}">${NBE.esc(NBE.cand(c.cand).name)}${c.cand === dec.winner ? ' <i class="fa-solid fa-check text-primary"></i>' : ''}</span>
+            <span class="scorebar"><span style="width:${Math.max(0, c.score / max) * 100}%"></span></span>
+            <span class="num text-end">${c.score.toFixed(2)}</span>
+          </div>`).join('');
+      if (dec.suppressed.length) html += `<div class="small fw-semibold mt-3 mb-1">Matched but blocked</div>` +
+        dec.suppressed.map((s) => `<div class="small d-flex justify-content-between border-top py-1"><span>${NBE.esc(NBE.cand(s.cand).name)}</span><span class="muted">${NBE.esc(s.reason)}</span></div>`).join('');
+      $('decision').innerHTML = html;
+    }
+
+    let selected = +params.get('day') || (p.decisions.filter((x) => x.winner).pop() || p.emails[p.emails.length - 1] || { day: 1 }).day;
+    function select(d) {
+      selected = d;
+      document.querySelectorAll('.lane-cell.sel, .axis.sel').forEach((el) => el.classList.remove('sel'));
+      document.querySelectorAll(`.lane-cell[data-day="${d}"], .axis[data-day="${d}"]`).forEach((el) => el.classList.add('sel'));
+      renderLog(); renderDecision();
+      history.replaceState(null, '', `?u=${p.id}&day=${d}`);
+    }
+    document.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-day]');
+      if (t && (t.closest('#lanes') || t.closest('#log'))) select(+t.dataset.day);
+    });
+    renderLanes();
+    select(selected);
+  </script>
+</body>
+</html>

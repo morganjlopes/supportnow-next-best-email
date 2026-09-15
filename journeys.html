@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journeys · Next Best Email</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link href="css/app.css" rel="stylesheet">
+  <style>
+    .strip { display: flex; gap: 1px; width: 180px; height: 14px; }
+    .strip i { flex: 1; border-radius: 1px; }
+  </style>
+</head>
+<body data-page="journeys" data-title="Journeys" data-crumbs="Admin / Next Best Email / Journeys">
+  <div id="app">
+    <nav id="sidebar" aria-label="Admin"></nav>
+    <div id="main">
+      <header id="page-header"></header>
+      <div class="container-fluid pb-5">
+        <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+          <input type="search" class="form-control form-control-sm" style="max-width:240px" id="f-q" placeholder="Search name or email">
+          <select class="form-select form-select-sm w-auto" id="f-rung"><option value="">Any rung</option></select>
+          <select class="form-select form-select-sm w-auto" id="f-app"><option value="">Any app</option></select>
+          <select class="form-select form-select-sm w-auto" id="f-cohort"><option value="">Everyone</option><option value="orch">Orchestrated</option><option value="hold">Holdout</option></select>
+          <select class="form-select form-select-sm w-auto" id="f-sort"><option value="rung">Sort: furthest rung</option><option value="emails">Sort: most emails</option><option value="quiet">Sort: longest quiet</option><option value="name">Sort: name</option></select>
+          <span class="small muted ms-auto" id="count"></span>
+        </div>
+
+        <div class="panel">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead><tr>
+                <th>Person</th><th>Came in through</th><th>Apps</th><th>Rung now</th>
+                <th>60 days <span class="fw-normal text-lowercase">(rung by day)</span></th>
+                <th class="text-end">Emails</th><th class="text-end">Opened</th><th class="text-end">Clicked</th><th>Last move</th><th></th>
+              </tr></thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/library.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/shell.js"></script>
+  <script>
+    NBE.mount();
+    const $ = (id) => document.getElementById(id);
+    const RUNG_COLOR = { S0: '#e3e6e9', S1: '#cfe2fb', S2: '#9dc9f7', S3: '#5fa9f0', S4: '#188aec', S5: '#0b5ea8' };
+    NBE.RUNGS.forEach((r) => $('f-rung').add(new Option(`${r.key} ${r.name}`, r.key)));
+    NBE.APPS.forEach((a) => $('f-app').add(new Option(a.name, a.key)));
+    const people = NBE.people();
+
+    function render() {
+      const q = $('f-q').value.toLowerCase(), fr = $('f-rung').value, fa = $('f-app').value, fc = $('f-cohort').value, sort = $('f-sort').value;
+      const list = people.filter((p) =>
+        (!q || (p.name + ' ' + p.email).toLowerCase().includes(q)) && (!fr || p.rung === fr) && (!fa || p.state.apps.has(fa)) &&
+        (!fc || (fc === 'hold') === p.holdout));
+      list.sort({
+        rung: (a, b) => NBE.rungIndex(b.rung) - NBE.rungIndex(a.rung) || b.state.followers - a.state.followers,
+        emails: (a, b) => b.emails.length - a.emails.length,
+        quiet: (a, b) => a.lastSignalDay - b.lastSignalDay,
+        name: (a, b) => a.name.localeCompare(b.name),
+      }[sort]);
+      $('count').textContent = `${list.length} of ${people.length} people`;
+      $('rows').innerHTML = list.map((p) => {
+        const last = p.conversions[p.conversions.length - 1];
+        return `<tr class="clickable" onclick="location.href='journey.html?u=${p.id}'">
+          <td><div class="fw-semibold">${NBE.esc(p.name)}</div><div class="small muted">${NBE.esc(p.email)}</div></td>
+          <td>${NBE.appChip(p.entry)}</td>
+          <td><span class="d-inline-flex gap-1">${[...p.state.apps].map(NBE.appDot).join('')}</span></td>
+          <td>${NBE.rungPill(p.rung)}</td>
+          <td><div class="strip" title="Rung on each of 60 days">${p.days.map((d) => `<i style="background:${RUNG_COLOR[d.rung]}"></i>`).join('')}</div></td>
+          <td class="text-end num">${p.emails.length}</td>
+          <td class="text-end num">${NBE.pct(p.emails.filter((e) => e.opened).length, p.emails.length)}</td>
+          <td class="text-end num">${p.emails.filter((e) => e.clicked).length}</td>
+          <td class="small">${last ? `${last.from} to ${last.to}, day ${last.day}${last.cause ? ' <i class="fa-solid fa-envelope-circle-check text-primary" title="After an email click"></i>' : ''}` : '<span class="muted">none</span>'}</td>
+          <td>${p.holdout ? '<span class="badge text-bg-light border">Holdout</span>' : ''}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="10" class="text-center muted py-4">Nobody matches those filters.</td></tr>';
+    }
+    ['f-q', 'f-rung', 'f-app', 'f-cohort', 'f-sort'].forEach((id) => $(id).addEventListener('input', render));
+    render();
+  </script>
+</body>
+</html>

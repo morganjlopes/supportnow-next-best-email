@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Candidate library · Next Best Email</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link href="css/app.css" rel="stylesheet">
+</head>
+<body data-page="library" data-title="Candidate library" data-crumbs="Admin / Next Best Email / Candidate library">
+  <template id="page-actions">
+    <button type="button" class="btn btn-link btn-sm text-muted" id="reset-library">Reset to defaults</button>
+    <button type="button" class="btn btn-primary" id="new-candidate"><i class="fa-solid fa-plus me-1"></i>New candidate</button>
+  </template>
+
+  <div id="app">
+    <nav id="sidebar" aria-label="Admin"></nav>
+    <div id="main">
+      <header id="page-header"></header>
+      <div class="container-fluid pb-5">
+        <p class="muted mb-3" style="max-width:760px">Each app authors candidates and says who they are for. No candidate sends on a timer. Every night the orchestrator checks who each one matches, ranks them by tier then score, and sends at most one a day per person.</p>
+
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <input type="search" class="form-control form-control-sm" style="max-width:240px" id="f-q" placeholder="Search candidates">
+          <select class="form-select form-select-sm w-auto" id="f-app"><option value="">All apps</option></select>
+          <select class="form-select form-select-sm w-auto" id="f-tier"><option value="">All tiers</option></select>
+          <select class="form-select form-select-sm w-auto" id="f-status"><option value="">Any status</option><option>live</option><option>draft</option><option>paused</option></select>
+        </div>
+
+        <div class="panel">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead><tr>
+                <th style="min-width:280px">Candidate</th><th>Tier</th><th style="white-space:nowrap">Moves</th><th style="min-width:240px">Who it is for</th>
+                <th class="text-end">Cooldown</th><th>Status</th><th class="text-end">Sent</th><th class="text-end">Open</th><th class="text-end">Click</th><th class="text-end" title="Rung moves within 2 days of a click">Credited</th>
+              </tr></thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <p class="small muted mt-3">Sent, open, click and credited come from the simulated 60-day run for orchestrated people only. Saving a change re-runs the simulation.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="editor" style="width:min(620px,100vw)" aria-labelledby="editor-title">
+    <div class="offcanvas-header border-bottom">
+      <h5 class="offcanvas-title" id="editor-title">New candidate</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+      <form id="cand-form" autocomplete="off">
+        <div class="row g-2 mb-2">
+          <div class="col-7"><label class="form-label small mb-1" for="c-name">Name (admin only)</label><input class="form-control" id="c-name" required></div>
+          <div class="col-5"><label class="form-label small mb-1" for="c-app">Owning app</label><select class="form-select" id="c-app"></select></div>
+        </div>
+        <div class="mb-3"><label class="form-label small mb-1" for="c-subject">Subject line</label><input class="form-control" id="c-subject" required></div>
+
+        <div class="row g-2 mb-1">
+          <div class="col-5"><label class="form-label small mb-1" for="c-tier">Tier</label><select class="form-select" id="c-tier"></select></div>
+          <div class="col-4"><label class="form-label small mb-1" for="c-advances">Nudges people on</label><select class="form-select" id="c-advances"></select></div>
+          <div class="col-3"><label class="form-label small mb-1" for="c-cooldown">Cooldown</label><div class="input-group"><input type="number" min="0" class="form-control" id="c-cooldown"><span class="input-group-text">d</span></div></div>
+        </div>
+        <div class="small muted mb-3" id="tier-help"></div>
+
+        <label class="form-label small mb-1">Who it is for <span class="muted">(all must match)</span></label>
+        <div id="rules"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="add-rule"><i class="fa-solid fa-plus me-1"></i>Add rule</button>
+
+        <div class="match-box mb-3" id="match"></div>
+
+        <label class="form-label small mb-1">Preview</label>
+        <div class="email-preview mb-3" id="preview"></div>
+
+        <div class="d-flex align-items-center gap-2">
+          <select class="form-select w-auto" id="c-status"><option>live</option><option>draft</option><option>paused</option></select>
+          <button type="submit" class="btn btn-primary">Save candidate</button>
+          <button type="button" class="btn btn-outline-danger ms-auto" id="delete-cand">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="js/library.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/content.js"></script>
+  <script src="js/shell.js"></script>
+  <script>
+    NBE.mount();
+    const $ = (id) => document.getElementById(id);
+    const editor = new bootstrap.Offcanvas($('editor'));
+    let editing = null;
+    let draftRules = [];
+
+    NBE.APPS.forEach((a) => { $('f-app').add(new Option(a.name, a.key)); $('c-app').add(new Option(a.name, a.key)); });
+    Object.entries(NBE.TIERS).filter(([k]) => k !== 'DRIP').forEach(([k, t]) => {
+      $('f-tier').add(new Option(`${k} ${t.name}`, k)); $('c-tier').add(new Option(`${k} ${t.name}`, k));
+    });
+    $('c-advances').add(new Option('Any rung (no nudge)', ''));
+    NBE.RUNGS.slice(0, 5).forEach((r, i) => $('c-advances').add(new Option(`${r.key} to ${NBE.RUNGS[i + 1].key}`, r.key)));
+
+    function stats() {
+      const orch = NBE.people().filter((p) => !p.holdout);
+      const emails = orch.flatMap((p) => p.emails);
+      const convs = orch.flatMap((p) => p.conversions);
+      const by = {};
+      NBE.candidates.forEach((c) => {
+        const s = emails.filter((e) => e.cand === c.id);
+        by[c.id] = { sent: s.length, opened: s.filter((e) => e.opened).length, clicked: s.filter((e) => e.clicked).length, credited: convs.filter((x) => x.cause === c.id).length };
+      });
+      return by;
+    }
+
+    function render() {
+      const q = $('f-q').value.toLowerCase(), fa = $('f-app').value, ft = $('f-tier').value, fs = $('f-status').value;
+      const st = stats();
+      const list = NBE.candidates.filter((c) =>
+        (!q || (c.name + ' ' + c.subject).toLowerCase().includes(q)) && (!fa || c.app === fa) && (!ft || c.tier === ft) && (!fs || c.status === fs));
+      $('rows').innerHTML = NBE.APPS.map((a) => {
+        const group = list.filter((c) => c.app === a.key);
+        if (!group.length) return '';
+        return `<tr class="table-light"><td colspan="10" class="py-2">${NBE.appChip(a.key)} <span class="small muted ms-1">${group.length} candidate${group.length === 1 ? '' : 's'}</span></td></tr>` +
+          group.map((c) => {
+            const s = st[c.id];
+            const next = c.advances ? NBE.RUNGS[NBE.rungIndex(c.advances) + 1].key : null;
+            const status = { live: 'text-bg-success', draft: 'text-bg-light border', paused: 'text-bg-warning' }[c.status];
+            return `<tr class="clickable" data-id="${c.id}">
+              <td><div class="fw-semibold">${NBE.esc(c.name)}${NBE.hasSavedContent(c.id) ? ' <span class="badge text-bg-light border fw-normal">Edited</span>' : ''}</div><div class="small muted">${NBE.esc(c.subject)}</div><a href="editor.html?c=${c.id}" class="small" onclick="event.stopPropagation()"><i class="fa-solid fa-pen-to-square me-1"></i>Edit email</a></td>
+              <td>${NBE.tierBadge(c.tier)}</td>
+              <td style="white-space:nowrap">${c.advances ? `${NBE.rungPill(c.advances)} <i class="fa-solid fa-arrow-right small muted"></i> ${NBE.rungPill(next)}` : '<span class="small muted">n/a</span>'}</td>
+              <td>${c.rules.length ? c.rules.map((r) => `<span class="rule-chip">${NBE.esc(NBE.ruleText(r))}</span>`).join('') : '<span class="small muted">Everyone</span>'}</td>
+              <td class="text-end num">${c.cooldown}d</td>
+              <td><span class="badge ${status}">${c.status}</span></td>
+              <td class="text-end num">${s.sent}</td>
+              <td class="text-end num">${NBE.pct(s.opened, s.sent)}</td>
+              <td class="text-end num">${NBE.pct(s.clicked, s.sent)}</td>
+              <td class="text-end num fw-semibold">${s.credited}</td>
+            </tr>`;
+          }).join('');
+      }).join('') || '<tr><td colspan="10" class="text-center muted py-4">No candidates match those filters.</td></tr>';
+    }
+
+    function valueInput(field, value) {
+      const f = NBE.FIELDS[field];
+      const opts = f.type === 'rung' ? NBE.RUNGS.map((r) => [r.key, `${r.key} ${r.name}`])
+        : f.type === 'bool' ? [['yes', 'yes'], ['no', 'no']]
+        : f.type === 'app' ? NBE.APPS.map((a) => [a.key, a.name])
+        : f.type === 'enum' ? f.options.map((o) => [o, o]) : null;
+      if (!opts) return `<input type="number" class="form-control form-control-sm" data-k="value" value="${NBE.esc(value ?? 0)}">`;
+      return `<select class="form-select form-select-sm" data-k="value">${opts.map(([v, l]) => `<option value="${v}" ${String(v) === String(value) ? 'selected' : ''}>${NBE.esc(l)}</option>`).join('')}</select>`;
+    }
+    const opsFor = (field) => ({ rung: ['=', '!='], bool: ['='], number: ['<', '>=', '='], app: ['includes', 'excludes'], enum: ['=', '!='] })[NBE.FIELDS[field].type];
+
+    function renderRules() {
+      $('rules').innerHTML = draftRules.map(([field, op, value], i) => `
+        <div class="rule-row" data-i="${i}">
+          <select class="form-select form-select-sm" data-k="field">${Object.entries(NBE.FIELDS).map(([k, f]) => `<option value="${k}" ${k === field ? 'selected' : ''}>${f.label}</option>`).join('')}</select>
+          <select class="form-select form-select-sm" data-k="op">${opsFor(field).map((o) => `<option ${o === op ? 'selected' : ''}>${o}</option>`).join('')}</select>
+          ${valueInput(field, value)}
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-k="remove" aria-label="Remove rule"><i class="fa-solid fa-xmark"></i></button>
+        </div>`).join('') || '<div class="small muted mb-2">No rules yet. Everyone in orchestration would qualify.</div>';
+      renderLive();
+    }
+
+    function renderLive() {
+      const adv = $('c-advances').value;
+      const pool = NBE.people().filter((p) => !p.holdout);
+      const hits = pool.filter((p) => NBE.matches(draftRules, { ...p.state, rung: p.rung }) && (!adv || p.rung === adv));
+      $('match').innerHTML = `
+        <div class="d-flex justify-content-between align-items-baseline"><b><span class="num">${hits.length}</span> of ${pool.length} people match right now</b><span class="small muted">at the end of the 60-day run</span></div>
+        <div class="mt-2">${hits.slice(0, 8).map((p) => `<a href="journey.html?u=${p.id}" class="rule-chip text-decoration-none">${NBE.esc(p.name)} ${p.rung}</a>`).join('') || '<span class="small muted">Nobody. Loosen a rule to see who this reaches.</span>'}${hits.length > 8 ? `<span class="small muted">and ${hits.length - 8} more</span>` : ''}</div>`;
+      const tier = NBE.TIERS[$('c-tier').value];
+      $('tier-help').textContent = tier.budget
+        ? `${$('c-tier').value} competes for the daily budget: at most one of these a day and three a week, across every app.`
+        : `${$('c-tier').value} sits outside the budget and always sends when it matches. Keep it for things people genuinely need.`;
+      const app = NBE.app($('c-app').value);
+      const draft = { ...(editing || {}), id: editing ? editing.id : '_draft', app: $('c-app').value, tier: $('c-tier').value, subject: $('c-subject').value || 'Subject line' };
+      const email = editing && NBE.hasSavedContent(editing.id) ? NBE.loadContent(editing) : NBE.defaultContent(draft);
+      const sample = NBE.mergeContext(null);
+      $('preview').innerHTML = `
+        <div class="ep-head"><div><b>From:</b> ${NBE.esc(app.name)} at SupportNow</div><div><b>Subject:</b> ${NBE.fillTags(email.subject, sample)}</div></div>
+        <div class="ep-mini">${NBE.renderEmail(email, sample)}</div>
+        <div class="p-2 border-top bg-light d-flex justify-content-between align-items-center gap-2">
+          <span class="small muted">${NBE.esc((NBE.TEMPLATES.find((t) => t.id === email.template) || {}).name || 'Custom')} template${editing && NBE.hasSavedContent(editing.id) ? ', edited' : ''}</span>
+          ${editing ? `<a class="btn btn-sm btn-primary" href="editor.html?c=${editing.id}"><i class="fa-solid fa-pen-to-square me-1"></i>Edit email content</a>` : '<span class="small muted">Save the candidate, then edit its email.</span>'}
+        </div>`;
+    }
+
+    function openEditor(c) {
+      editing = c;
+      const x = c || { name: '', subject: '', app: 'sp', tier: 'T3', advances: 'S1', cooldown: 4, status: 'draft', rules: [['rung', '=', 'S1']] };
+      $('editor-title').textContent = c ? 'Edit candidate' : 'New candidate';
+      $('c-name').value = x.name; $('c-subject').value = x.subject; $('c-app').value = x.app;
+      $('c-tier').value = x.tier; $('c-advances').value = x.advances || ''; $('c-cooldown').value = x.cooldown; $('c-status').value = x.status;
+      $('delete-cand').hidden = !c;
+      draftRules = x.rules.map((r) => [...r]);
+      renderRules();
+      editor.show();
+    }
+
+    $('rules').addEventListener('change', (e) => {
+      const row = e.target.closest('.rule-row'); if (!row) return;
+      const i = +row.dataset.i, k = e.target.dataset.k;
+      if (k === 'field') { const f = e.target.value; draftRules[i] = [f, opsFor(f)[0], NBE.FIELDS[f].type === 'number' ? 0 : NBE.FIELDS[f].type === 'bool' ? 'yes' : NBE.FIELDS[f].type === 'rung' ? 'S0' : NBE.FIELDS[f].type === 'app' ? 'sp' : NBE.FIELDS[f].options[0]]; renderRules(); return; }
+      if (k === 'op') draftRules[i][1] = e.target.value;
+      if (k === 'value') draftRules[i][2] = e.target.value;
+      renderLive();
+    });
+    $('rules').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-k="remove"]'); if (!btn) return;
+      draftRules.splice(+btn.closest('.rule-row').dataset.i, 1); renderRules();
+    });
+    $('add-rule').addEventListener('click', () => { draftRules.push(['apps', 'includes', 'sp']); renderRules(); });
+    ['c-app', 'c-tier', 'c-advances', 'c-subject'].forEach((id) => $(id).addEventListener('input', renderLive));
+
+    function commit() { NBE.saveCandidates(NBE.candidates); NBE._people = null; render(); }
+    $('cand-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const data = { name: $('c-name').value.trim(), subject: $('c-subject').value.trim(), app: $('c-app').value, tier: $('c-tier').value,
+        advances: $('c-advances').value || null, cooldown: +$('c-cooldown').value || 0, status: $('c-status').value, rules: draftRules };
+      if (editing) Object.assign(editing, data);
+      else NBE.candidates.push({ id: 'c-' + Date.now().toString(36), ...data });
+      commit(); editor.hide();
+    });
+    $('delete-cand').addEventListener('click', () => {
+      if (!editing || !confirm(`Delete "${editing.name}"?`)) return;
+      NBE.candidates = NBE.candidates.filter((c) => c !== editing); commit(); editor.hide();
+    });
+    $('rows').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) openEditor(NBE.candidates.find((c) => c.id === tr.dataset.id)); });
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#new-candidate')) openEditor(null);
+      if (e.target.closest('#reset-library') && confirm('Reset the library to the default candidates?')) { NBE.candidates = NBE.DEFAULT_CANDIDATES.map((c) => ({ ...c, rules: c.rules.map((r) => [...r]) })); commit(); }
+    });
+    ['f-q', 'f-app', 'f-tier', 'f-status'].forEach((id) => $(id).addEventListener('input', render));
+    render();
+  </script>
+</body>
+</html>

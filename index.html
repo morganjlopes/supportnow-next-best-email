@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Overview · Next Best Email</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link href="css/app.css" rel="stylesheet">
+</head>
+<body data-page="overview" data-title="Next Best Email" data-crumbs="Admin / Next Best Email / Overview">
+  <template id="page-actions">
+    <a href="library.html" class="btn btn-outline-secondary btn-sm">Candidate library</a>
+    <a href="journeys.html" class="btn btn-primary btn-sm">Browse journeys</a>
+  </template>
+
+  <div id="app">
+    <nav id="sidebar" aria-label="Admin"></nav>
+    <div id="main">
+      <header id="page-header"></header>
+      <div class="container-fluid pb-5">
+
+        <div class="row g-3 mb-4" id="stats"></div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-lg-7">
+            <div class="panel h-100">
+              <div class="panel-h">
+                <h2>How far people got</h2>
+                <div class="legend"><span><i class="sw" style="background:#188aec"></i>Orchestrated</span><span><i class="sw" style="background:#212529;width:3px"></i>Holdout (per-app drips)</span></div>
+              </div>
+              <div class="panel-b" id="funnel"></div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="panel h-100">
+              <div class="panel-h"><h2>Where each rung's moves came from</h2></div>
+              <div class="panel-b" id="moves"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel mb-4">
+          <div class="panel-h">
+            <h2>Orchestrated sends per day</h2>
+            <div class="legend" id="vol-legend"></div>
+          </div>
+          <div class="panel-b">
+            <div class="dayscroll"><div class="bars" id="volume"></div></div>
+            <div class="d-flex justify-content-between small muted mt-1 num" style="min-width:620px"><span>Day 1</span><span>Day 30</span><span>Day 60</span></div>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-lg-7">
+            <div class="panel">
+              <div class="panel-h"><h2>Candidates credited with rung moves</h2><a href="library.html" class="small">Open library</a></div>
+              <div class="table-responsive">
+                <table class="table mb-0">
+                  <thead><tr><th>Candidate</th><th>Tier</th><th class="text-end">Sent</th><th class="text-end">Click</th><th class="text-end">Moves</th></tr></thead>
+                  <tbody id="top-cands"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="panel">
+              <div class="panel-h"><h2>Latest decisions</h2><span class="small muted">Day 60 run</span></div>
+              <div class="panel-b pt-2" id="decisions"></div>
+            </div>
+          </div>
+        </div>
+
+        <p class="small muted mt-4 mb-0">All numbers are simulated from a seeded model tuned to the 2026 funnel, not real users. The holdout is 1 in 10 people, too few to read lift from; it is here to show the comparison the real dashboard would make.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/library.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/shell.js"></script>
+  <script>
+    NBE.mount();
+    const people = NBE.people();
+    const orch = people.filter((p) => !p.holdout);
+    const hold = people.filter((p) => p.holdout);
+    const reached = (list, k) => list.filter((p) => NBE.rungIndex(p.rung) >= NBE.rungIndex(k)).length;
+    const avg = (list, f) => list.reduce((s, p) => s + f(p), 0) / Math.max(list.length, 1);
+    const conversions = orch.flatMap((p) => p.conversions);
+    const credited = conversions.filter((c) => c.cause);
+
+    const stat = (label, value, sub) => `
+      <div class="col-sm-6 col-xl-3"><div class="stat-card">
+        <div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub}</div>
+      </div></div>`;
+    document.getElementById('stats').innerHTML = [
+      stat('People in orchestration', orch.length, `plus ${hold.length} in the holdout`),
+      stat('Emails per person, 60 days', avg(orch, (p) => p.emails.length).toFixed(1), `holdout gets ${avg(hold, (p) => p.emails.length).toFixed(1)}`),
+      stat('Reached 5+ people', NBE.pct(reached(orch, 'S3'), orch.length), `holdout ${NBE.pct(reached(hold, 'S3'), hold.length)}`),
+      stat('Rung moves after a click', `${credited.length} <span class="fs-6 muted">of ${conversions.length}</span>`, 'clicked an email within 2 days of moving'),
+    ].join('');
+
+    document.getElementById('funnel').innerHTML = NBE.RUNGS.map((r) => {
+      const o = reached(orch, r.key) / orch.length;
+      const h = hold.length ? reached(hold, r.key) / hold.length : 0;
+      return `<div class="funnel-row">
+        <div>${NBE.rungPill(r.key)} <span class="muted small">${r.name}</span></div>
+        <div class="funnel-track"><div class="funnel-fill" style="width:${o * 100}%"></div><div class="funnel-hold" style="left:calc(${h * 100}% - 1px)" title="Holdout ${Math.round(h * 100)}%"></div></div>
+        <div class="num text-end">${Math.round(o * 100)}%</div>
+      </div>`;
+    }).join('');
+
+    document.getElementById('moves').innerHTML = NBE.RUNGS.slice(0, 5).map((r, i) => {
+      const moves = conversions.filter((c) => c.from === r.key);
+      const byCause = {};
+      moves.forEach((c) => { const k = c.cause || 'none'; byCause[k] = (byCause[k] || 0) + 1; });
+      const top = Object.entries(byCause).filter(([k]) => k !== 'none').sort((a, b) => b[1] - a[1]).slice(0, 2);
+      return `<div class="d-flex align-items-start gap-2 py-2 ${i ? 'border-top' : ''}">
+        <div style="width:215px;white-space:nowrap" class="flex-shrink-0">${NBE.rungPill(r.key)} <i class="fa-solid fa-arrow-right small muted"></i> ${NBE.rungPill(NBE.RUNGS[i + 1].key)}</div>
+        <div class="small flex-grow-1">
+          <div><b class="num">${moves.length}</b> moved, <span class="num">${moves.length - (byCause.none || 0)}</span> after an email</div>
+          <div class="muted">${top.map(([k, n]) => `${NBE.esc(NBE.cand(k).name)} (${n})`).join(', ') || 'no email credited'}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const TIER_ORDER = ['T2', 'T3', 'T4', 'T5', 'T6'];
+    const colors = { T2: 'var(--t2)', T3: 'var(--t3)', T4: 'var(--t4)', T5: 'var(--t5)', T6: 'var(--t6)' };
+    document.getElementById('vol-legend').innerHTML = TIER_ORDER.map((t) => `<span><i class="sw" style="background:${colors[t]}"></i>${t} ${NBE.TIERS[t].name}</span>`).join('');
+    const perDay = Array.from({ length: NBE.DAYS }, () => ({}));
+    orch.forEach((p) => p.emails.forEach((e) => { perDay[e.day - 1][e.tier] = (perDay[e.day - 1][e.tier] || 0) + 1; }));
+    const peak = Math.max(...perDay.map((d) => Object.values(d).reduce((a, b) => a + b, 0)), 1);
+    document.getElementById('volume').innerHTML = perDay.map((d, i) => {
+      const total = Object.values(d).reduce((a, b) => a + b, 0);
+      return `<div class="col" title="Day ${i + 1}: ${total} sends">${TIER_ORDER.filter((t) => d[t]).map((t) =>
+        `<div class="seg" style="height:${(d[t] / peak) * 100}%;background:${colors[t]}"></div>`).join('')}</div>`;
+    }).join('');
+
+    const rows = NBE.candidates.map((c) => {
+      const sent = orch.flatMap((p) => p.emails).filter((e) => e.cand === c.id);
+      return { c, sent: sent.length, clicked: sent.filter((e) => e.clicked).length, moves: credited.filter((x) => x.cause === c.id).length };
+    }).filter((r) => r.sent).sort((a, b) => b.moves - a.moves || b.sent - a.sent).slice(0, 7);
+    document.getElementById('top-cands').innerHTML = rows.map((r) => `
+      <tr><td>${NBE.appDot(r.c.app)} ${NBE.esc(r.c.name)}</td><td>${NBE.tierBadge(r.c.tier)}</td>
+      <td class="text-end num">${r.sent}</td><td class="text-end num">${NBE.pct(r.clicked, r.sent)}</td><td class="text-end num fw-semibold">${r.moves}</td></tr>`).join('');
+
+    const latest = orch.map((p) => ({ p, d: p.decisions[p.decisions.length - 1] })).filter((x) => x.d)
+      .sort((a, b) => b.d.day - a.d.day).slice(0, 7);
+    document.getElementById('decisions').innerHTML = latest.map(({ p, d }) => `
+      <a href="journey.html?u=${p.id}&day=${d.day}" class="d-flex justify-content-between align-items-center gap-2 py-2 border-bottom text-decoration-none text-reset">
+        <div><div class="fw-semibold">${NBE.esc(p.name)} <span class="muted small fw-normal">day ${d.day}</span></div>
+        <div class="small ${d.held ? 'muted' : ''}">${d.held ? `Held: ${NBE.esc(d.held)}` : `Sent "${NBE.esc(NBE.cand(d.winner).subject)}"`}</div></div>
+        <div class="text-end flex-none">${d.held ? '<span class="tier tier-drip">Hold</span>' : NBE.tierBadge(NBE.cand(d.winner).tier)}</div>
+      </a>`).join('');
+  </script>
+</body>
+</html>

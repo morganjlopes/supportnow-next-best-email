@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Email editor · Next Best Email</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link href="css/app.css" rel="stylesheet">
+  <style>
+    .ed-toolbar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 12px; font-size: 13.5px; }
+    .ed-toolbar label { display: flex; align-items: center; gap: 8px; margin: 0; }
+    .ed-toolbar select { max-width: 300px; }
+    .ed-grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .ed-side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+    .ed-side .nav-tabs .nav-link { font-size: 13.5px; padding: .45rem .8rem; }
+    .ed-canvas { background: #eef0f3; border-radius: 8px; padding: 20px; overflow-x: auto; min-height: 640px; }
+    .inbox { margin: 0 auto 14px; background: #fff; border: 1px solid #dfe3e8; border-radius: 10px; padding: 10px 14px; font-family: Helvetica, Arial, sans-serif; font-size: 14px; line-height: 20px; }
+    .em-wrap { margin: 0 auto; transition: width .2s ease; }
+    @media (prefers-reduced-motion: reduce) { .em-wrap { transition: none; } }
+
+    .pal-group { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 14px 0 6px; }
+    .pal-group:first-child { margin-top: 0; }
+    .pal-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .pal-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font-size: 13px; cursor: grab; user-select: none; position: relative; }
+    .pal-item:hover, .pal-item:focus-visible { border-color: #188aec; background: #f5f9fe; outline: none; }
+    .pal-item i { color: #188aec; width: 16px; text-align: center; }
+    .pal-new { position: absolute; top: -7px; right: 6px; font-size: 9.5px; font-weight: 700; background: #fff3cd; color: #7a5a00; border: 1px solid #f1d58a; border-radius: 3px; padding: 0 4px; line-height: 14px; }
+    #em-blocks > .pal-item { margin: 8px 32px; }
+    .sortable-fallback { opacity: .9 !important; box-shadow: 0 8px 20px rgba(0,0,0,.18); }
+
+    .blk { position: relative; outline: 1px dashed transparent; outline-offset: -1px; cursor: pointer; }
+    .blk:hover { outline-color: #9dc9f7; }
+    .blk.is-sel { outline: 2px solid #188aec; outline-offset: -2px; }
+    .blk-tools { position: absolute; top: -13px; right: 8px; display: none; gap: 2px; background: #212529; border-radius: 6px; padding: 3px; z-index: 3; align-items: center; }
+    .blk:hover .blk-tools, .blk.is-sel .blk-tools { display: flex; }
+    .blk-tools button { border: 0; background: none; color: #fff; width: 26px; height: 24px; border-radius: 4px; font-size: 12px; padding: 0; }
+    .blk-tools button:hover, .blk-tools button:focus-visible { background: rgba(255,255,255,.18); outline: none; }
+    .blk-name { color: rgba(255,255,255,.7); font-size: 11px; padding: 0 6px; font-family: system-ui, sans-serif; }
+    .blk-handle { cursor: grab !important; }
+    .blk-ghost { opacity: .35; background: #e7f1fd; }
+    .em-blocks:empty { min-height: 180px; display: flex; align-items: center; justify-content: center; }
+    .em-blocks:empty::before { content: "Drag blocks here to start"; color: #8d959d; font-family: system-ui, sans-serif; font-size: 14px; }
+
+    .tag-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .tag-chip { border: 1px solid #cfe3fb; background: #f1f7fe; color: #0b4f8a; border-radius: 999px; font-size: 11.5px; padding: 1px 8px; }
+    .tag-chip:hover { background: #dbeafd; }
+    .render-note { font-size: 12.5px; border-radius: 6px; padding: 8px 10px; background: #eef6ee; color: #1e5c2e; margin-top: 6px; }
+    .render-note.is-new { background: #fff8e1; color: #6b4f00; }
+    .render-note code { color: inherit; font-size: 11.5px; }
+
+    .tpl { display: flex; gap: 12px; width: 100%; text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+    .tpl:hover { border-color: #188aec; }
+    .tpl.is-current { border-color: #188aec; box-shadow: 0 0 0 1px #188aec; }
+    .tpl-thumb { width: 64px; flex: none; border: 1px solid #e3e6e9; border-radius: 4px; padding: 4px; display: flex; flex-direction: column; gap: 3px; background: #fff; }
+    .tt { display: block; border-radius: 2px; background: #e3e6e9; height: 4px; }
+    .tt-hero { background: #f6f2ea; height: 14px; }
+    .tt-heading { height: 5px; width: 55%; background: #8d959d; }
+    .tt-button { background: #198aec; height: 6px; width: 60%; margin: 0 auto; border-radius: 3px; }
+    .tt-registry_card, .tt-callout { background: #eef1f5; height: 9px; border: 1px solid #dfe3e8; }
+    .tt-registry_preview { background: #cfe2fb; height: 14px; }
+    .tt-collection { height: 14px; background: repeating-linear-gradient(90deg, #e3e6e9 0 45%, transparent 45% 55%); }
+    .tt-divider { height: 1px; background: #d7d2c7; }
+    .tt-quote { height: 6px; border-left: 2px solid #c9c2b4; background: #f4f1ea; }
+    .tt-needs_list { height: 10px; background: repeating-linear-gradient(180deg, #e3e6e9 0 2px, transparent 2px 5px); }
+  </style>
+</head>
+<body data-page="editor" data-title="Email editor" data-crumbs="Admin / Next Best Email / Email editor">
+  <template id="page-actions">
+    <span class="small me-2" id="save-state"></span>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="revert">Revert</button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="send-test"><i class="fa-solid fa-paper-plane me-1"></i>Send test</button>
+    <button type="button" class="btn btn-primary btn-sm" id="save"><i class="fa-solid fa-floppy-disk me-1"></i>Save email</button>
+  </template>
+
+  <div id="app">
+    <nav id="sidebar" aria-label="Admin"></nav>
+    <div id="main">
+      <header id="page-header"></header>
+      <div class="container-fluid pb-5">
+        <div class="ed-toolbar">
+          <label>Email for <select class="form-select form-select-sm" id="cand-select"></select></label>
+          <label>Preview as <select class="form-select form-select-sm" id="person-select"></select></label>
+          <div class="btn-group btn-group-sm" role="group" aria-label="Preview width" id="width-toggle">
+            <button type="button" class="btn btn-outline-secondary active" data-width="600"><i class="fa-solid fa-desktop me-1"></i>Desktop</button>
+            <button type="button" class="btn btn-outline-secondary" data-width="375"><i class="fa-solid fa-mobile-screen me-1"></i>Mobile</button>
+          </div>
+          <a class="small ms-auto" id="who-link" href="library.html">Who gets this email</a>
+        </div>
+
+        <div class="ed-grid">
+          <aside class="ed-side panel" aria-label="Editor tools">
+            <ul class="nav nav-tabs px-2 pt-2" role="tablist">
+              <li class="nav-item" role="presentation"><button class="nav-link active" id="blocks-tab" data-bs-toggle="tab" data-bs-target="#tab-blocks" type="button" role="tab">Blocks</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="templates-tab" data-bs-toggle="tab" data-bs-target="#tab-templates" type="button" role="tab">Templates</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="edit-tab" data-bs-toggle="tab" data-bs-target="#tab-edit" type="button" role="tab">Email</button></li>
+            </ul>
+            <div class="tab-content p-3">
+              <div class="tab-pane show active" id="tab-blocks" role="tabpanel"><div id="palette"></div></div>
+              <div class="tab-pane" id="tab-templates" role="tabpanel"><div id="templates"></div></div>
+              <div class="tab-pane" id="tab-edit" role="tabpanel"><div id="inspector"></div></div>
+            </div>
+          </aside>
+
+          <section class="ed-canvas" aria-label="Email preview">
+            <div class="inbox" id="inbox"></div>
+            <div class="em-wrap" id="email"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div class="toast align-items-center text-bg-dark border-0" id="toast" role="status" aria-live="polite">
+      <div class="d-flex"><div class="toast-body" id="toast-body"></div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+  <script src="js/library.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/content.js"></script>
+  <script src="js/shell.js"></script>
+  <script>
+    NBE.mount();
+    const $ = (id) => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    const people = NBE.people();
+    const cand = NBE.candidates.find((c) => c.id === params.get('c')) || NBE.candidates.find((c) => c.id === 'sp-four') || NBE.candidates[0];
+    let content = NBE.loadContent(cand);
+    let saved = JSON.stringify(content);
+    let selectedId = null;
+    let width = 600;
+    let personId = params.get('u') || '';
+    const isDirty = () => JSON.stringify(content) !== saved;
+
+    document.querySelector('#page-header h1').textContent = `Email: ${cand.name}`;
+    $('who-link').href = `library.html#${cand.id}`;
+
+    NBE.APPS.forEach((a) => {
+      const group = NBE.candidates.filter((c) => c.app === a.key);
+      if (!group.length) return;
+      const og = document.createElement('optgroup'); og.label = a.name;
+      group.forEach((c) => og.append(new Option(`${c.name}${NBE.hasSavedContent(c.id) ? ' (edited)' : ''}`, c.id)));
+      $('cand-select').append(og);
+    });
+    $('cand-select').value = cand.id;
+
+    $('person-select').append(new Option('Sample family (Maria)', ''));
+    $('person-select').append(new Option('Show merge tags instead', '__tags__'));
+    const peopleGroup = document.createElement('optgroup'); peopleGroup.label = 'People from the journeys';
+    [...people].filter((p) => !p.holdout).sort((a, b) => NBE.rungIndex(b.rung) - NBE.rungIndex(a.rung)).forEach((p) => {
+      const fits = NBE.matches(cand.rules, { ...p.state, rung: p.rung }) && (!cand.advances || p.rung === cand.advances);
+      peopleGroup.append(new Option(`${p.name} · ${p.rung}${fits ? ' · would get this' : ''}`, p.id));
+    });
+    $('person-select').append(peopleGroup);
+    $('person-select').value = personId;
+    if ($('person-select').value !== personId) personId = '';
+
+    function ctx() {
+      if (personId === '__tags__') return { ...NBE.mergeContext(null), showTags: true };
+      return NBE.mergeContext(people.find((p) => p.id === personId) || null);
+    }
+
+    // ---------- canvas ----------
+    function render() {
+      const c = ctx();
+      $('inbox').style.width = `${width}px`;
+      $('inbox').innerHTML = `
+        <div class="d-flex justify-content-between"><b>${NBE.esc(NBE.app(cand.app).name)} at SupportNow</b><span class="muted small">9:14 AM</span></div>
+        <div class="fw-semibold">${NBE.fillTags(content.subject, c) || '<span class="muted">No subject line</span>'}</div>
+        <div class="muted small text-truncate">${NBE.fillTags(content.preview, c)}</div>`;
+      $('email').style.width = `${width}px`;
+      $('email').innerHTML = NBE.renderEmail(content, c, { editable: true, selectedId, mobile: width < 500 });
+      Sortable.create($('em-blocks'), {
+        group: { name: 'email', pull: false, put: true },
+        handle: '.blk-handle', draggable: '.blk', animation: 150, ghostClass: 'blk-ghost', forceFallback: true,
+        onAdd(evt) {
+          const { type, preset } = evt.item.dataset;
+          evt.item.remove();
+          addBlock(type, preset, evt.newIndex);
+        },
+        onUpdate(evt) { moveBlock(evt.oldIndex, evt.newIndex); },
+      });
+      renderSaveState();
+    }
+    const change = (opts = {}) => setTimeout(() => { render(); if (opts.inspector) renderInspector(); });
+
+    function addBlock(type, preset, index) {
+      const b = NBE.newBlock(type, preset ? JSON.parse(preset) : {});
+      content.blocks.splice(index ?? content.blocks.length, 0, b);
+      selectedId = b.id;
+      change({ inspector: true });
+      showTab('edit-tab');
+    }
+    function moveBlock(from, to) {
+      const [b] = content.blocks.splice(from, 1);
+      content.blocks.splice(to, 0, b);
+      change();
+    }
+    function doAct(act, id) {
+      const i = content.blocks.findIndex((b) => b.id === id);
+      if (i < 0) return;
+      if (act === 'up' && i > 0) moveBlock(i, i - 1);
+      if (act === 'down' && i < content.blocks.length - 1) moveBlock(i, i + 1);
+      if (act === 'dup') {
+        const copy = { ...JSON.parse(JSON.stringify(content.blocks[i])), id: NBE.newBlock(content.blocks[i].type).id };
+        content.blocks.splice(i + 1, 0, copy); selectedId = copy.id; change({ inspector: true });
+      }
+      if (act === 'del') {
+        content.blocks.splice(i, 1);
+        if (selectedId === id) selectedId = null;
+        change({ inspector: true });
+      }
+    }
+    function select(id) {
+      selectedId = id;
+      document.querySelectorAll('#em-blocks .blk').forEach((el) => el.classList.toggle('is-sel', el.dataset.id === id));
+      renderInspector();
+      showTab('edit-tab');
+    }
+    const showTab = (id) => bootstrap.Tab.getOrCreateInstance($(id)).show();
+
+    $('email').addEventListener('click', (e) => {
+      if (e.target.closest('a')) e.preventDefault();
+      const act = e.target.closest('[data-act]');
+      const blk = e.target.closest('.blk');
+      if (act && blk) { doAct(act.dataset.act, blk.dataset.id); return; }
+      select(blk ? blk.dataset.id : null);
+    });
+    $('email').addEventListener('dblclick', (e) => {
+      if (!e.target.closest('.blk')) return;
+      setTimeout(() => $('inspector').querySelector('[data-key]')?.focus());
+    });
+
+    // ---------- palette + templates ----------
+    function palItem(type, preset, label, icon) {
+      const def = NBE.BLOCKS[type];
+      return `<div class="pal-item" tabindex="0" role="button" data-type="${type}" ${preset ? `data-preset="${NBE.esc(JSON.stringify(preset))}"` : ''} title="Drag onto the email, or press Enter to add">
+        <i class="fa-solid ${icon || def.icon}"></i><span>${NBE.esc(label || def.label)}</span>${def.shortcode === null ? '<span class="pal-new">New</span>' : ''}</div>`;
+    }
+    function renderPalette() {
+      const groups = [
+        ['Text and actions', ['hero', 'heading', 'text', 'button', 'callout', 'quote', 'divider']],
+        ['From their registry', ['registry_card', 'registry_preview', 'needs_list']],
+      ];
+      $('palette').innerHTML = groups.map(([label, types]) =>
+        `<div class="pal-group">${label}</div><div class="pal-list">${types.map((t) => palItem(t)).join('')}</div>`).join('') +
+        `<div class="pal-group">Collections</div><div class="pal-list">${Object.entries(NBE.COLLECTIONS).map(([k, src]) =>
+          palItem('collection', { source: k, heading: src.defaultHeading, layout: src.defaultLayout, count: src.defaultCount, link_label: src.linkLabel }, src.label, src.icon)).join('')}</div>
+        <p class="small muted mt-3 mb-0">Drag a block onto the email, or click it to add it below the selected block. <span class="pal-new position-static">New</span> blocks need a shortcode built before they can send. Collection items are samples.</p>`;
+      document.querySelectorAll('#palette .pal-list').forEach((list) => Sortable.create(list, {
+        group: { name: 'email', pull: 'clone', put: false }, sort: false, animation: 150, forceFallback: true,
+      }));
+    }
+    function addFromPalette(item) {
+      const i = content.blocks.findIndex((b) => b.id === selectedId);
+      addBlock(item.dataset.type, item.dataset.preset, i >= 0 ? i + 1 : content.blocks.length);
+    }
+    $('palette').addEventListener('click', (e) => { const item = e.target.closest('.pal-item'); if (item) addFromPalette(item); });
+    $('palette').addEventListener('keydown', (e) => {
+      const item = e.target.closest('.pal-item');
+      if (item && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); addFromPalette(item); }
+    });
+
+    function renderTemplates() {
+      $('templates').innerHTML = NBE.TEMPLATES.map((t) => {
+        const current = content.template === t.id;
+        return `<button type="button" class="tpl ${current ? 'is-current' : ''}" data-tpl="${t.id}">
+          <span class="tpl-thumb" aria-hidden="true">${t.build(cand).map((b) => `<i class="tt tt-${b.type}"></i>`).join('')}</span>
+          <span><span class="d-block fw-semibold">${t.name}${current ? ' <span class="badge text-bg-primary ms-1">In use</span>' : ''}</span><span class="d-block small muted">${t.desc}</span></span>
+        </button>`;
+      }).join('') + '<p class="small muted mt-2 mb-0">Templates are starting layouts. Switching keeps the subject line and replaces the blocks.</p>';
+    }
+    $('templates').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-tpl]');
+      if (!btn) return;
+      const t = NBE.TEMPLATES.find((x) => x.id === btn.dataset.tpl);
+      if (content.blocks.length && !confirm(`Replace the blocks with the "${t.name}" template? The subject line stays.`)) return;
+      content.template = t.id;
+      content.blocks = t.build(cand);
+      if (!content.preview) content.preview = t.preview;
+      selectedId = null;
+      renderTemplates();
+      change({ inspector: true });
+    });
+
+    // ---------- inspector ----------
+    function field(f, obj) {
+      const id = `f-${f.key}`;
+      const v = obj[f.key] ?? '';
+      const opts = typeof f.options === 'function' ? f.options() : f.options;
+      const hint = f.hint ? `<div class="form-text">${NBE.esc(f.hint)}</div>` : '';
+      if (f.type === 'toggle') {
+        return `<div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" role="switch" id="${id}" data-key="${f.key}" ${v ? 'checked' : ''}>
+          <label class="form-check-label small" for="${id}">${f.label}</label>${hint}</div>`;
+      }
+      let input;
+      if (f.type === 'textarea') input = `<textarea class="form-control form-control-sm" rows="${f.rows || 6}" id="${id}" data-key="${f.key}">${NBE.esc(v)}</textarea>`;
+      else if (f.type === 'select') input = `<select class="form-select form-select-sm" id="${id}" data-key="${f.key}">${opts.map(([val, label]) => `<option value="${val}" ${String(val) === String(v) ? 'selected' : ''}>${NBE.esc(label)}</option>`).join('')}</select>`;
+      else if (f.type === 'number') input = `<input type="number" class="form-control form-control-sm" id="${id}" data-key="${f.key}" min="${f.min ?? 1}" max="${f.max ?? 4}" value="${NBE.esc(v)}">`;
+      else input = `<input type="text" class="form-control form-control-sm" id="${id}" data-key="${f.key}" value="${NBE.esc(v)}">`;
+      const chips = f.tags ? `<div class="tag-chips">${NBE.MERGE_TAGS.map((t) => `<button type="button" class="tag-chip" data-tag="${t.tag}" data-for="${id}" title="Insert {{${t.tag}}}">+ ${t.label}</button>`).join('')}</div>` : '';
+      return `<div class="mb-3"><label class="form-label small mb-1" for="${id}">${f.label}</label>${input}${chips}${hint}</div>`;
+    }
+
+    function renderInspector() {
+      const b = content.blocks.find((x) => x.id === selectedId);
+      $('edit-tab').textContent = b ? NBE.BLOCKS[b.type].label : 'Email';
+      if (!b) {
+        $('inspector').innerHTML = `
+          <p class="small muted">These apply to the whole email. Click any block in the preview to edit it.</p>
+          ${field({ key: 'subject', label: 'Subject line', type: 'text', tags: true }, content)}
+          ${field({ key: 'preview', label: 'Preview text', type: 'text', tags: true, hint: 'Shown next to the subject in the inbox.' }, content)}
+          <div class="small muted">Template: <b>${NBE.esc((NBE.TEMPLATES.find((t) => t.id === content.template) || {}).name || 'Custom')}</b> · ${content.blocks.length} blocks</div>`;
+        bindFields(content);
+        return;
+      }
+      const def = NBE.BLOCKS[b.type];
+      const fields = def.fields.filter((f) => !f.showIf || f.showIf(b));
+      $('inspector').innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <span class="fw-semibold"><i class="fa-solid ${def.icon} text-primary me-2"></i>${def.label}</span>
+          <button type="button" class="btn btn-sm btn-link p-0" id="insp-done">Back to email settings</button>
+        </div>
+        ${fields.map((f) => field(f, b)).join('') || '<p class="small muted">Nothing to write here. This block fills itself in for each person.</p>'}
+        <div class="render-note ${def.shortcode === null ? 'is-new' : ''}">${NBE.renderNote(def)}</div>
+        <div class="d-flex gap-2 mt-3">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-insp-act="dup"><i class="fa-solid fa-clone me-1"></i>Duplicate</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-insp-act="del"><i class="fa-solid fa-trash me-1"></i>Remove block</button>
+        </div>`;
+      bindFields(b);
+    }
+
+    function bindFields(obj) {
+      $('inspector').querySelectorAll('[data-key]').forEach((el) => {
+        const ev = el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input';
+        el.addEventListener(ev, () => {
+          const k = el.dataset.key;
+          if (el.type === 'checkbox') obj[k] = el.checked;
+          else if (el.type === 'number') obj[k] = Math.max(+el.min, Math.min(+el.max, +el.value || +el.min));
+          else obj[k] = el.value;
+          const def = obj.type && NBE.BLOCKS[obj.type];
+          change({ inspector: el.tagName === 'SELECT' && !!def && def.fields.some((f) => f.showIf) });
+        });
+      });
+      $('inspector').querySelectorAll('.tag-chip').forEach((chip) => chip.addEventListener('click', () => {
+        const el = $(chip.dataset.for);
+        const tag = `{{${chip.dataset.tag}}}`;
+        const s = el.selectionStart ?? el.value.length;
+        const end = el.selectionEnd ?? el.value.length;
+        el.value = el.value.slice(0, s) + tag + el.value.slice(end);
+        el.focus();
+        el.setSelectionRange(s + tag.length, s + tag.length);
+        el.dispatchEvent(new Event('input'));
+      }));
+      $('insp-done')?.addEventListener('click', () => select(null));
+      $('inspector').querySelectorAll('[data-insp-act]').forEach((btn) => btn.addEventListener('click', () => doAct(btn.dataset.inspAct, selectedId)));
+    }
+
+    // ---------- toolbar, save ----------
+    function renderSaveState() {
+      const el = $('save-state');
+      if (!el) return;
+      el.innerHTML = isDirty()
+        ? '<span class="text-warning-emphasis"><i class="fa-solid fa-circle me-1" style="font-size:7px;vertical-align:2px"></i>Unsaved changes</span>'
+        : `<span class="muted">${NBE.hasSavedContent(cand.id) ? 'Saved' : 'Default content'}</span>`;
+      $('revert').disabled = !isDirty();
+    }
+    function toast(msg) {
+      $('toast-body').textContent = msg;
+      bootstrap.Toast.getOrCreateInstance($('toast'), { delay: 3500 }).show();
+    }
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#save')) {
+        NBE.saveContent(cand, content);
+        saved = JSON.stringify(content);
+        renderSaveState();
+        toast('Saved. The next nightly run uses this version.');
+      }
+      if (e.target.closest('#send-test')) toast('Prototype: nothing was sent. The real button sends this version to your inbox.');
+      if (e.target.closest('#revert') && isDirty() && confirm('Discard your unsaved changes?')) {
+        content = JSON.parse(saved);
+        selectedId = null;
+        renderTemplates();
+        change({ inspector: true });
+      }
+    });
+    $('cand-select').addEventListener('change', (e) => {
+      if (isDirty() && !confirm('You have unsaved changes. Leave this email anyway?')) { e.target.value = cand.id; return; }
+      saved = JSON.stringify(content);
+      location.href = `editor.html?c=${e.target.value}${personId ? `&u=${personId}` : ''}`;
+    });
+    $('person-select').addEventListener('change', (e) => {
+      personId = e.target.value;
+      history.replaceState(null, '', `?c=${cand.id}${personId ? `&u=${personId}` : ''}`);
+      change();
+    });
+    $('width-toggle').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-width]');
+      if (!btn) return;
+      width = +btn.dataset.width;
+      $('width-toggle').querySelectorAll('.btn').forEach((b) => b.classList.toggle('active', b === btn));
+      change();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.target.closest('input, textarea, select')) return;
+      if (e.key === 'Escape' && selectedId) select(null);
+      if (e.key === 'Delete' && selectedId) doAct('del', selectedId);
+    });
+    window.addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
+
+    renderPalette();
+    renderTemplates();
+    renderInspector();
+    render();
+  </script>
+</body>
+</html>
